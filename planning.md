@@ -40,11 +40,11 @@ The platform forwards the raw text to Provenance Guard's `POST /submit`.
 5. **Storage (`store.py`)** persists the submission and writes a structured
    **audit-log** entry: the decision, both signal outputs, the weights used, the
    confidence, and the label variant.
-6. The API returns `{submission_id, attribution, confidence, ai_score, label,
+6. The API returns `{content_id, attribution, confidence, ai_score, label,
    signals, status}` to the platform, which renders the label under the post.
 
 **Appeal flow:** the creator disputes the call and the platform calls
-`POST /appeal` with `{submission_id, creator_id, reasoning}`. Provenance Guard
+`POST /appeal` with `{content_id, creator_id, creator_reasoning}`. Provenance Guard
 sets the submission's status to `under_review`, writes an `appeal` entry to the
 audit log linked to the original decision, and returns the appeal record. A human
 moderator later reads the appeal queue (`GET /appeals`) — no automated
@@ -94,30 +94,30 @@ re-classification happens.
                   └───────┬───────────┘     └──────────────────┘
                           │ JSON response
                           ▼
-        { submission_id, attribution, confidence, ai_score,
+        { content_id, attribution, confidence, ai_score,
           label:{variant,title,body}, signals:[...], status }
 ```
 
 ### Appeal flow
 
 ```
-   POST /appeal { submission_id, creator_id, reasoning }
+   POST /appeal { content_id, creator_id, creator_reasoning }
           │
           ▼
-   ┌────────────────┐   404 if submission unknown
+   ┌────────────────┐   404 if content_id unknown
    │  Load original │───────────────────────────► client
    │   submission   │
    └───────┬────────┘
            │ set status = "under_review"
            ▼
-   ┌────────────────┐     ┌──────────────────────────────┐
-   │ Store appeal   │────►│ Audit log (row, type=appeal,  │
-   │  (reasoning)   │     │  links original decision)     │
-   └───────┬────────┘     └──────────────────────────────┘
+   ┌────────────────────┐   ┌──────────────────────────────┐
+   │ Store appeal       │──►│ Audit log (row, type=appeal,  │
+   │ (creator_reasoning)│   │  links original decision)     │
+   └───────┬────────────┘   └──────────────────────────────┘
            │ appeal record
            ▼
-   { appeal_id, submission_id, status:"under_review",
-     original_decision:{...}, reasoning }
+   { appeal_id, content_id, status:"under_review",
+     original_decision:{...}, appeal_reasoning }
                      │
                      ▼   (later, human moderator)
               GET /appeals → appeal queue for review
@@ -207,7 +207,7 @@ and are reproduced verbatim in the README.
 - **Who** can appeal: the creator of a submission (identified by `creator_id`),
   via the platform. Any classification can be appealed — most usefully a
   `likely_ai` call on genuinely human work.
-- **What they provide:** the `submission_id` and free-text `reasoning`
+- **What they provide:** the `content_id` and free-text `creator_reasoning`
   (why they believe the call is wrong).
 - **What the system does on receipt:**
   1. Verifies the submission exists (`404` otherwise).
@@ -247,9 +247,9 @@ and are reproduced verbatim in the README.
 
 | Method | Path | Accepts | Returns |
 |---|---|---|---|
-| `POST` | `/submit` | `{text, creator_id?, content_type?}` | decision + label + signals + `submission_id` |
-| `POST` | `/appeal` | `{submission_id, creator_id?, reasoning}` | appeal record + original decision |
-| `GET` | `/submission/<id>` | — | current stored state of one submission |
+| `POST` | `/submit` | `{text, creator_id?, content_type?}` | decision + label + signals + `content_id` |
+| `POST` | `/appeal` | `{content_id, creator_id?, creator_reasoning}` | appeal record + original decision |
+| `GET` | `/submission/<content_id>` | — | current stored state of one submission |
 | `GET` | `/appeals` | — | appeal queue for human moderators |
 | `GET` | `/log` | `?limit=` | structured audit-log entries |
 | `GET` | `/analytics` | — | detection counts, appeal rate, extra metric (stretch) |

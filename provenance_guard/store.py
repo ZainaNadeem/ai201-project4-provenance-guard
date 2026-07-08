@@ -71,6 +71,21 @@ def init_db(db_path: str | None = None) -> None:
     conn.close()
 
 
+def _signal_scores(decision: dict) -> tuple:
+    """Pull the individual (llm_score, stylometry_score) out of a decision.
+
+    llm_score is None when the LLM signal was unavailable (offline fallback).
+    """
+    llm_score = None
+    stylo_score = None
+    for sig in decision.get("signals", []):
+        if sig["name"] == "llm" and sig.get("available"):
+            llm_score = sig["ai_probability"]
+        elif sig["name"] == "stylometry":
+            stylo_score = sig["ai_probability"]
+    return llm_score, stylo_score
+
+
 def _audit(conn, event_type: str, submission_id: str, creator_id, detail: dict) -> str:
     entry_id = _new_id("log")
     conn.execute(
@@ -84,15 +99,16 @@ def _audit(conn, event_type: str, submission_id: str, creator_id, detail: dict) 
 def record_submission(decision: dict, text: str, creator_id=None, db_path=None) -> dict:
     """Persist a submission + its decision, and write a 'decision' audit row."""
     conn = get_conn(db_path)
-    sub_id = _new_id("sub")
+    content_id = str(uuid.uuid4())  # public identifier used by /submit, /appeal, /log
     created = _now()
+    llm_score, stylo_score = _signal_scores(decision)
     with conn:
         conn.execute(
             "INSERT INTO submissions (id, creator_id, content_type, text, attribution,"
             " confidence, ai_score, label_variant, decision_json, status, created_at)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
-                sub_id,
+                content_id,
                 creator_id,
                 decision["content_type"],
                 text,
@@ -108,20 +124,23 @@ def record_submission(decision: dict, text: str, creator_id=None, db_path=None) 
         _audit(
             conn,
             "decision",
-            sub_id,
+            content_id,
             creator_id,
             {
                 "attribution": decision["attribution"],
                 "confidence": decision["confidence"],
                 "ai_score": decision["ai_score"],
+                "llm_score": llm_score,               # None when the LLM signal was unavailable
+                "stylometry_score": stylo_score,
                 "label_variant": decision["label"]["variant"],
                 "weights": decision["weights"],
                 "signals": decision["signals"],
                 "single_signal": decision["single_signal"],
+                "status": "classified",
             },
         )
     conn.close()
-    return {"submission_id": sub_id, "status": "classified", "created_at": created}
+    return {"content_id": content_id, "status": "classified", "created_at": created}
 
 
 def get_submission(submission_id: str, db_path=None) -> dict | None:
@@ -135,10 +154,10 @@ def get_submission(submission_id: str, db_path=None) -> dict | None:
     return d
 
 
-def record_appeal(submission_id: str, reasoning: str, creator_id=None, db_path=None) -> dict | None:
+def record_appeal(content_id: str, creator_reasoning: str, creator_id=None, db_path=None) -> dict | None:
     """Set submission status to 'under_review', log the appeal. None if unknown."""
     conn = get_conn(db_path)
-    row = conn.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,)).fetchone()
+    row = conn.execute("SELECT * FROM submissions WHERE id = ?", (content_id,)).fetchone()
     if row is None:
         conn.close()
         return None
@@ -146,21 +165,21 @@ def record_appeal(submission_id: str, reasoning: str, creator_id=None, db_path=N
     appeal_id = _new_id("app")
     created = _now()
     with conn:
-        conn.execute("UPDATE submissions SET status = ? WHERE id = ?", ("under_review", submission_id))
+        conn.execute("UPDATE submissions SET status = ? WHERE id = ?", ("under_review", content_id))
         conn.execute(
             "INSERT INTO appeals (id, submission_id, creator_id, reasoning, status, created_at)"
             " VALUES (?,?,?,?,?,?)",
-            (appeal_id, submission_id, creator_id, reasoning, "under_review", created),
+            (appeal_id, content_id, creator_id, creator_reasoning, "under_review", created),
         )
         _audit(
             conn,
             "appeal",
-            submission_id,
+            content_id,
             creator_id,
             {
                 "appeal_id": appeal_id,
-                "reasoning": reasoning,
-                "new_status": "under_review",
+                "appeal_reasoning": creator_reasoning,
+                "status": "under_review",
                 "original_decision": {
                     "attribution": original["attribution"],
                     "confidence": original["confidence"],
@@ -173,10 +192,10 @@ def record_appeal(submission_id: str, reasoning: str, creator_id=None, db_path=N
     conn.close()
     return {
         "appeal_id": appeal_id,
-        "submission_id": submission_id,
+        "content_id": content_id,
         "status": "under_review",
         "created_at": created,
-        "reasoning": reasoning,
+        "appeal_reasoning": creator_reasoning,
         "original_decision": original,
     }
 
@@ -199,6 +218,12 @@ def list_appeals(db_path=None) -> list[dict]:
 
 
 def get_audit_log(limit: int = 100, db_path=None) -> list[dict]:
+    """Return flat, structured audit entries.
+
+    Each entry leads with content_id / creator_id / timestamp / event_type, then
+    spreads the event detail (attribution, confidence, llm_score,
+    stylometry_score, status, ... or the appeal fields) to the top level.
+    """
     conn = get_conn(db_path)
     rows = conn.execute(
         "SELECT * FROM audit_log ORDER BY created_at ASC LIMIT ?", (limit,)
@@ -206,9 +231,16 @@ def get_audit_log(limit: int = 100, db_path=None) -> list[dict]:
     conn.close()
     out = []
     for r in rows:
-        d = dict(r)
-        d["detail"] = json.loads(d.pop("detail_json"))
-        out.append(d)
+        detail = json.loads(r["detail_json"])
+        entry = {
+            "log_id": r["id"],
+            "content_id": r["submission_id"],
+            "creator_id": r["creator_id"],
+            "timestamp": r["created_at"],
+            "event_type": r["event_type"],
+        }
+        entry.update(detail)
+        out.append(entry)
     return out
 
 

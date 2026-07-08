@@ -70,11 +70,11 @@ def main():
     print("=" * 78)
     print("CONFIDENCE / LABEL VARIATION CHECK")
     print("=" * 78)
-    submission_ids = {}
+    content_ids = {}
     for s in SAMPLES:
         decision = classify(s["text"])
         saved = store.record_submission(decision, s["text"], creator_id=s["creator_id"])
-        submission_ids[s["creator_id"]] = saved["submission_id"]
+        content_ids[s["creator_id"]] = saved["content_id"]
         print(f"\n▶ {s['label']}")
         print(
             f"    attribution = {decision['attribution']:<14} "
@@ -91,10 +91,10 @@ def main():
     print("\n" + "=" * 78)
     print("APPEAL FLOW")
     print("=" * 78)
-    target = submission_ids["creator_ai_demo"]
+    target = content_ids["creator_ai_demo"]
     appeal = store.record_appeal(
         target,
-        reasoning="I wrote this myself for a class assignment; the flat tone is just my formal style.",
+        creator_reasoning="I wrote this myself for a class assignment; the flat tone is just my formal style.",
         creator_id="creator_ai_demo",
     )
     print(f"Appealed {target} -> status now '{appeal['status']}'")
@@ -104,8 +104,8 @@ def main():
     print("SANITY: distinct confidence values were produced (not a binary flip)")
     print("=" * 78)
     log = store.get_audit_log()
-    confs = sorted({round(e["detail"]["confidence"], 2) for e in log if e["event_type"] == "decision"})
-    variants = sorted({e["detail"]["label_variant"] for e in log if e["event_type"] == "decision"})
+    confs = sorted({round(e["confidence"], 2) for e in log if e["event_type"] == "decision"})
+    variants = sorted({e["label_variant"] for e in log if e["event_type"] == "decision"})
     print(f"distinct confidence values: {confs}")
     print(f"label variants produced:    {variants}")
     print(f"\nAudit log now has {len(log)} entries (see GET /log).")

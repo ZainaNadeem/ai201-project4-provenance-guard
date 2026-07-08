@@ -61,7 +61,7 @@ def create_app(db_path: str | None = None) -> Flask:
 
         return jsonify(
             {
-                "submission_id": saved["submission_id"],
+                "content_id": saved["content_id"],
                 "status": saved["status"],
                 "attribution": decision["attribution"],
                 "confidence": decision["confidence"],
@@ -71,25 +71,28 @@ def create_app(db_path: str | None = None) -> Flask:
                 "weights": decision["weights"],
                 "single_signal": decision["single_signal"],
             }
-        ), 201
+        ), 200
 
     @app.post("/appeal")
     @limiter.limit(config.APPEAL_LIMITS)
     def appeal():
         body = request.get_json(silent=True) or {}
-        submission_id = body.get("submission_id")
-        reasoning = (body.get("reasoning") or "").strip()
-        if not submission_id:
-            return jsonify({"error": "Field 'submission_id' is required."}), 400
-        if not reasoning:
-            return jsonify({"error": "Field 'reasoning' is required to appeal."}), 400
+        # Primary field names per the spec; older names accepted for convenience.
+        content_id = body.get("content_id") or body.get("submission_id")
+        creator_reasoning = (body.get("creator_reasoning") or body.get("reasoning") or "").strip()
+        if not content_id:
+            return jsonify({"error": "Field 'content_id' is required."}), 400
+        if not creator_reasoning:
+            return jsonify({"error": "Field 'creator_reasoning' is required to appeal."}), 400
 
         result = store.record_appeal(
-            submission_id, reasoning, creator_id=body.get("creator_id"), db_path=_db()
+            content_id, creator_reasoning, creator_id=body.get("creator_id"), db_path=_db()
         )
         if result is None:
-            return jsonify({"error": f"No submission with id '{submission_id}'."}), 404
-        return jsonify(result), 201
+            return jsonify({"error": f"No content with id '{content_id}'."}), 404
+        return jsonify(
+            {"message": "Appeal received and logged.", **result}
+        ), 200
 
     @app.get("/submission/<submission_id>")
     def get_submission(submission_id):

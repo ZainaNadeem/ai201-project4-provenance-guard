@@ -94,10 +94,10 @@ attribution, confidence score, and the transparency-label text.
 ```json
 { "text": "…the piece to analyze…", "creator_id": "u1", "content_type": "text" }
 ```
-**Response (`201`)** — abridged:
+**Response (`200`)** — abridged. `content_id` is a UUID; save it to file an appeal:
 ```json
 {
-  "submission_id": "sub_d6861c91685f",
+  "content_id": "6da2444c-84a6-4f05-b0b0-a25170dbcf59",
   "status": "classified",
   "attribution": "likely_human",
   "confidence": 0.6538,
@@ -217,18 +217,23 @@ Rendered examples (from the label builder, at 88% / 82% / 34% confidence):
 
 - **Who:** the creator of a submission (via `creator_id`). Any classification is
   appealable — most importantly a `likely_ai` call on genuine human work.
-- **Input:** `{ "submission_id": "...", "creator_id": "...", "reasoning": "..." }`
-  (`reasoning` is required).
-- **On receipt the system:** (1) verifies the submission exists (`404` if not);
+- **Input:** `{ "content_id": "...", "creator_id": "...", "creator_reasoning": "..." }`
+  (`creator_reasoning` is required).
+- **On receipt the system:** (1) verifies the content exists (`404` if not);
   (2) sets the submission's `status` to **`under_review`**; (3) writes an
   `appeal` audit-log entry that includes the creator's reasoning **and a snapshot
-  of the original decision** so the record is self-contained; (4) returns the
-  appeal record. Re-classification is intentionally **manual**.
+  of the original decision** so the record is self-contained; (4) returns a
+  confirmation + the appeal record. Re-classification is intentionally **manual**.
 - **Human reviewer view:** `GET /appeals` returns the queue — each item pairs the
   creator's reasoning with the original decision + full signal breakdown, so a
   moderator has everything needed to uphold or overturn.
 
-Verified end-to-end: after an appeal, `GET /submission/<id>` reports
+```bash
+curl -s -X POST localhost:5000/appeal -H 'Content-Type: application/json' \
+  -d '{"content_id":"<id-from-submit>","creator_reasoning":"I wrote this myself; I am a non-native English speaker and my style is more formal than typical."}'
+```
+
+Verified end-to-end: after an appeal, `GET /submission/<content_id>` reports
 `"status": "under_review"` and `GET /appeals` shows the queued item.
 
 ### 6. Rate limiting
@@ -243,57 +248,79 @@ JSON body when exceeded (verified in testing).
 | `POST /appeal` | **5/min, 20/day** | Appeals are rare and deliberate — a genuine creator files at most a few. Tighter limits here blunt spam/harassment of the human review queue, which is the scarce resource. |
 | all endpoints (default) | **200/day** | Backstop on read endpoints (`/log`, `/analytics`) to prevent scraping. |
 
+**Evidence** — sending 12 rapid `/submit` requests (the first 10 succeed, then
+the limiter trips):
+
+```
+$ for i in $(seq 1 12); do curl -s -o /dev/null -w "%{http_code}\n" \
+    -X POST localhost:5000/submit -H "Content-Type: application/json" \
+    -d '{"text":"This is a test submission for rate limit testing.","creator_id":"ratelimit-test"}'; done
+200
+200
+200
+200
+200
+200
+200
+200
+200
+200
+429
+429
+```
+The `429` body: `{"error": "Rate limit exceeded.", "detail": "10 per 1 minute"}`.
+
 ### 7. Audit log
 
 Every decision **and** every appeal writes exactly one structured row to the
-`audit_log` table (`store.py`), with the full signal breakdown stored as JSON so
-each entry is self-contained. Read it via `GET /log?limit=N`.
+`audit_log` table (`store.py`). Entries are flat and lead with
+`content_id` / `creator_id` / `timestamp` / `event_type`, then carry the decision
+fields (including **both individual signal scores**) or the appeal fields. The
+full nested `signals` breakdown is included too. Read it via `GET /log?limit=N`.
 
-Sample entries (real output from `python seed_demo.py`, abridged for space —
-`GET /log` returns the full nested `signals`):
+Sample entries (real output from `python seed_demo.py`, `signals` abridged):
 
 ```json
 [
   {
-    "id": "log_d53068b3f1e4", "event_type": "decision",
-    "submission_id": "sub_b49ba74965d6", "creator_id": "creator_ai_demo",
-    "created_at": "2026-07-08T20:01:00.807621+00:00",
-    "detail": {
-      "attribution": "likely_ai", "confidence": 0.5981, "ai_score": 0.8518,
-      "label_variant": "uncertain", "weights": {"llm": 0.0, "stylometry": 1.0},
-      "single_signal": true,
-      "signals": [
-        {"name": "llm", "available": false, "reason": "No valid GROQ_API_KEY configured; using stylometry only."},
-        {"name": "stylometry", "available": true, "ai_probability": 0.8518, "reliability": 1.0,
-         "metrics": {"burstiness": {"value": 0.298, "human_likeness": 0.096}, "...": "..."},
-         "n_words": 60, "n_sentences": 5}
-      ]
-    }
+    "log_id": "log_d7ae8cd6f1f6", "event_type": "decision",
+    "content_id": "a4ee9c7f-354c-42fb-b31c-95aab612cf40",
+    "creator_id": "creator_ai_demo",
+    "timestamp": "2026-07-08T20:11:56.082416+00:00",
+    "attribution": "likely_ai", "confidence": 0.5981, "ai_score": 0.8518,
+    "llm_score": null, "stylometry_score": 0.8518,
+    "label_variant": "uncertain", "status": "classified",
+    "weights": {"llm": 0.0, "stylometry": 1.0}, "single_signal": true,
+    "signals": ["… full LLM + stylometry breakdown …"]
   },
   {
-    "id": "log_b4081c29c85b", "event_type": "decision",
-    "submission_id": "sub_d6861c91685f", "creator_id": "creator_human_demo",
-    "created_at": "2026-07-08T20:01:00.808267+00:00",
-    "detail": {
-      "attribution": "likely_human", "confidence": 0.6538, "ai_score": 0.1154,
-      "label_variant": "high_confidence_human", "single_signal": true, "signals": ["..."]
-    }
+    "log_id": "log_d47ccd015ad1", "event_type": "decision",
+    "content_id": "6da2444c-84a6-4f05-b0b0-a25170dbcf59",
+    "creator_id": "creator_human_demo",
+    "timestamp": "2026-07-08T20:11:56.082944+00:00",
+    "attribution": "likely_human", "confidence": 0.6538, "ai_score": 0.1154,
+    "llm_score": null, "stylometry_score": 0.1154,
+    "label_variant": "high_confidence_human", "status": "classified",
+    "weights": {"llm": 0.0, "stylometry": 1.0}, "single_signal": true,
+    "signals": ["…"]
   },
   {
-    "id": "log_...", "event_type": "appeal",
-    "submission_id": "sub_b49ba74965d6", "creator_id": "creator_ai_demo",
-    "created_at": "2026-07-08T20:01:00.8xxxxx+00:00",
-    "detail": {
-      "appeal_id": "app_...", "new_status": "under_review",
-      "reasoning": "I wrote this myself for a class assignment; the flat tone is just my formal style.",
-      "original_decision": {"attribution": "likely_ai", "confidence": 0.5981, "ai_score": 0.8518, "signals": ["..."]}
-    }
+    "log_id": "log_…", "event_type": "appeal",
+    "content_id": "a4ee9c7f-354c-42fb-b31c-95aab612cf40",
+    "creator_id": "creator_ai_demo",
+    "timestamp": "2026-07-08T20:11:56.083…+00:00",
+    "appeal_id": "app_…", "status": "under_review",
+    "appeal_reasoning": "I wrote this myself for a class assignment; the flat tone is just my formal style.",
+    "original_decision": {"attribution": "likely_ai", "confidence": 0.5981, "ai_score": 0.8518, "signals": ["…"]}
   }
 ]
 ```
 
-The log captures, per the spec: the confidence score, the signals used (and that
-the LLM was unavailable), and appeals linked to their original decision.
+The log captures, per the spec: content id, timestamp, attribution, confidence,
+**both individual signal scores** (`llm_score` is `null` when the LLM was
+unavailable), status, and appeals linked (via `content_id` + `original_decision`)
+to their original decision. `python seed_demo.py` generates 5 entries
+(4 decisions + 1 appeal).
 
 ---
 
@@ -329,6 +356,46 @@ the LLM was unavailable), and appeals linked to their original decision.
    the agreement term. This is a case we *should* be unsure about.
 
 ---
+
+## Spec reflection
+
+**How the spec helped.** Writing the confidence formula and the three label
+variants *before* any code (planning.md §3.2–3.3) forced the decision that
+`confidence` and `ai_score` are two different things. Had I coded first I'd
+almost certainly have conflated "how AI is it" with "how sure are we" into one
+number — and the asymmetric label thresholds (AI needs ≥0.75, human ≥0.65) only
+make sense once those are separate. The spec surfaced that design choice while it
+was still cheap to make.
+
+**Where the implementation diverged.** The spec's confidence formula was
+`distance · agreement · reliability`. In implementation I added an
+`AGREEMENT_FLOOR` term (`0.6 + 0.4·agreement` instead of raw `agreement`),
+because the raw version let a single strongly-directional signal be crushed to
+near-zero confidence by mild disagreement — a clearly-human piece with one
+dissenting sub-signal was landing in "uncertain". The floor keeps disagreement
+*meaningful* without letting it dominate. The spec is annotated to point here as
+the source of truth.
+
+## AI usage
+
+Two concrete instances (this project was built with AI assistance per the
+milestone workflow):
+
+1. **Stylometry signal + Flask skeleton (M3).** I gave the AI the detection-signal
+   section and the architecture diagram and asked for the `POST /submit` route
+   stub and the first signal function. It produced a working type-token ratio but
+   used *plain* TTR, which is length-biased (longer texts always look less
+   diverse). I overrode it with **root TTR (Guiraud's R)** and added the
+   `reliability` term for short texts, which the generated version lacked
+   entirely.
+
+2. **Confidence scoring + label mapping (M4–M5).** I asked for the combine logic
+   from the uncertainty section. The generated scorer used a **symmetric** 0.5
+   threshold for both labels — reasonable-looking, but it silently dropped the
+   false-positive asymmetry the spec calls for. I corrected it to the split
+   `HIGH_CONF_AI = 0.75` / `HIGH_CONF_HUMAN = 0.65` bars and added the
+   single-signal penalty so the offline (no-LLM) path reports honestly lower
+   confidence rather than pretending two signals agreed.
 
 ## API reference
 
