@@ -174,6 +174,26 @@ stylometry-only mode):
 | Ambiguous (edited, mixed) | uncertain | 0.61 | **0.18** | uncertain |
 | Short repetitive poem | likely_ai | 0.80 | **0.15** | uncertain |
 
+**Two example submissions with noticeably different confidence** (actual scores
+from the run above):
+
+- **Higher-confidence case (confidence 0.65 → `high_confidence_human`):**
+  > *"I didn't sleep. The radiator clanked all night like somebody trapped behind
+  > the wall, and by four I'd given up. So I made tea … Snow. Actual snow, in April!
+  > I laughed out loud, alone, at nothing. … I don't know. Maybe I was just tired."*
+
+  Bursty sentence lengths, contractions, hedges, varied punctuation → `ai_score`
+  0.12, confidence **0.65**, labeled **✍️ Likely human-written**.
+
+- **Lower-confidence case (confidence 0.18 → `uncertain`):**
+  > *"The project began with a simple idea, but it grew complicated fast. We wanted
+  > to help people, and honestly we underestimated the work. There were setbacks. …
+  > iterating on the design and gathering feedback from early users along the way."*
+
+  Middling burstiness and diversity, few voice markers → `ai_score` 0.61 (a weak
+  AI lean) but confidence collapses to **0.18**, so it's labeled **❓ Attribution
+  uncertain** rather than either extreme.
+
 Distinct confidence values `[0.15, 0.18, 0.60, 0.65]` — not a binary flip.
 Two things worth noticing, both intentional:
 - The "clearly AI" text leans AI strongly (0.85) but only reaches **0.60**
