@@ -35,6 +35,13 @@ python seed_demo.py
 python run.py     # -> http://127.0.0.1:5000
 ```
 
+Then open **http://127.0.0.1:5000** in a browser for the reader-facing **demo UI**:
+paste text, hit *Analyze* to see the live transparency label (color-coded by
+variant, with a confidence meter and signal breakdown), and *Appeal* to flip the
+status to `under_review`. It's a thin page that calls the same `/submit` and
+`/appeal` endpoints — the API is the product; this just shows the label in
+context the way a platform would render it.
+
 Quick smoke test:
 
 ```bash
@@ -421,6 +428,7 @@ milestone workflow):
 
 | Method | Path | Purpose |
 |---|---|---|
+| `GET`  | `/` | Reader-facing demo UI (paste text → label; appeal) |
 | `POST` | `/submit` | Classify text → decision + label + signals |
 | `POST` | `/appeal` | Contest a classification → `under_review` |
 | `GET`  | `/submission/<id>` | Current stored state of one submission |

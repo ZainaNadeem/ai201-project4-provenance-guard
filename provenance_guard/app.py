@@ -1,6 +1,7 @@
 """Flask API for Provenance Guard.
 
 Endpoints:
+  GET  /                   minimal reader-facing demo UI
   POST /submit            classify text -> decision + label (rate limited)
   POST /appeal            contest a classification (rate limited)
   GET  /submission/<id>   current stored state of one submission
@@ -15,7 +16,7 @@ from __future__ import annotations
 import os
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -42,6 +43,11 @@ def create_app(db_path: str | None = None) -> Flask:
 
     def _db():
         return app.config["DB_PATH"]
+
+    @app.get("/")
+    def demo_page():
+        """Minimal reader-facing demo UI (for the walkthrough / manual testing)."""
+        return render_template("index.html")
 
     @app.post("/submit")
     @limiter.limit(config.SUBMIT_LIMITS)

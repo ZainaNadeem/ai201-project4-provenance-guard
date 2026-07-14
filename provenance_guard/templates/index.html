@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Provenance Guard — demo</title>
+  <style>
+    :root {
+      --bg: #0f1220; --panel: #191d2e; --panel2: #212639;
+      --ink: #e8eaf2; --muted: #9aa3b8; --line: #2c3350;
+      --ai: #f0a020; --human: #35c48a; --uncertain: #8a93ad; --accent: #6c8cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 32px 16px;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+    .card { background: var(--panel); border: 1px solid var(--line);
+            border-radius: 14px; padding: 20px; margin-bottom: 18px; }
+    label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 13px;
+            color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    textarea {
+      width: 100%; min-height: 150px; resize: vertical; padding: 12px;
+      background: var(--panel2); color: var(--ink); border: 1px solid var(--line);
+      border-radius: 10px; font: inherit;
+    }
+    .row { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    input[type=text] {
+      flex: 1; min-width: 160px; padding: 10px 12px; background: var(--panel2);
+      color: var(--ink); border: 1px solid var(--line); border-radius: 10px; font: inherit;
+    }
+    button {
+      background: var(--accent); color: #fff; border: 0; border-radius: 10px;
+      padding: 11px 18px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button.ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); }
+    button:disabled { opacity: .5; cursor: default; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+    /* Transparency label — the reader-facing artifact */
+    .label { border-radius: 14px; padding: 18px 20px; border-left: 6px solid var(--uncertain);
+             background: var(--panel2); }
+    .label.ai { border-left-color: var(--ai); }
+    .label.human { border-left-color: var(--human); }
+    .label.uncertain { border-left-color: var(--uncertain); }
+    .label h2 { margin: 0 0 6px; font-size: 18px; }
+    .label p { margin: 0; color: #d3d8e6; }
+
+    .meter { height: 8px; background: var(--line); border-radius: 6px; overflow: hidden; margin: 14px 0 6px; }
+    .meter > span { display: block; height: 100%; background: var(--accent); }
+    .metline { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+
+    .signals { margin-top: 14px; font-size: 13px; color: var(--muted); }
+    .signals code { color: var(--ink); }
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px;
+            background: var(--panel); border: 1px solid var(--line); margin-right: 6px; }
+    details { margin-top: 12px; }
+    summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+    pre { background: #0c0f1a; border: 1px solid var(--line); border-radius: 10px;
+          padding: 12px; overflow-x: auto; font-size: 12px; color: #c8cfe0; }
+    .ok { color: var(--human); } .warn { color: var(--ai); }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🛡️ Provenance Guard</h1>
+    <p class="sub">Paste a piece of writing. The service classifies it with two
+       signals and shows the transparency label a reader on the platform would see.</p>
+
+    <div class="card">
+      <label for="text">Content to analyze</label>
+      <textarea id="text" placeholder="Paste a poem, story excerpt, or blog post…"></textarea>
+      <div class="row">
+        <input type="text" id="creator" placeholder="creator_id (optional)" value="demo-creator" />
+        <button id="go">Analyze</button>
+      </div>
+      <div class="hint" id="pick">
+        Try:
+        <a href="#" data-k="human">a human diary entry</a> ·
+        <a href="#" data-k="ai">generic AI prose</a> ·
+        <a href="#" data-k="poem">a short poem</a>
+      </div>
+    </div>
+
+    <div id="result" class="card hidden">
+      <div id="label" class="label">
+        <h2 id="labelTitle"></h2>
+        <p id="labelBody"></p>
+      </div>
+
+      <div class="meter"><span id="meterFill"></span></div>
+      <div class="metline"><span>confidence</span><span id="confPct"></span></div>
+
+      <div class="signals" id="signals"></div>
+
+      <div class="row">
+        <button class="ghost" id="appealBtn">Appeal this result</button>
+        <span class="hint" id="cid"></span>
+      </div>
+
+      <div id="appealBox" class="card hidden" style="margin-top:14px;background:var(--panel2)">
+        <label for="reason">Why do you believe this is wrong?</label>
+        <textarea id="reason" style="min-height:80px"
+          placeholder="e.g. I wrote this myself; I'm a non-native speaker so my style reads formal."></textarea>
+        <div class="row"><button id="sendAppeal">Submit appeal</button></div>
+        <div class="hint" id="appealMsg"></div>
+      </div>
+
+      <details>
+        <summary>Raw API response</summary>
+        <pre id="raw"></pre>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    const SAMPLES = {
+      human: "I didn't sleep. The radiator clanked all night like somebody trapped behind the wall, and by four I'd given up. So I made tea — the good stuff my sister mailed me, wrapped in a receipt she'd scribbled on — and sat by the window. Snow. Actual snow, in April! I laughed out loud, alone, at nothing. Sometimes the city surprises you like that, right when you've decided it never will. I don't know. Maybe I was just tired.",
+      ai: "Artificial intelligence is transforming the modern world in numerous significant ways. It offers a wide range of benefits across many different industries. Businesses are able to improve their efficiency and productivity. Customers are able to receive faster and more helpful responses. In conclusion, artificial intelligence represents an important and valuable technology for the future of society and the global economy.",
+      poem: "so much depends\nupon\na red wheel\nbarrow\nglazed with rain\nwater"
+    };
+    let currentId = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    document.querySelectorAll("#pick a").forEach(a =>
+      a.addEventListener("click", (e) => { e.preventDefault(); $("text").value = SAMPLES[a.dataset.k]; }));
+
+    $("go").addEventListener("click", analyze);
+    $("appealBtn").addEventListener("click", () => $("appealBox").classList.toggle("hidden"));
+    $("sendAppeal").addEventListener("click", sendAppeal);
+
+    async function analyze() {
+      const text = $("text").value.trim();
+      if (!text) return;
+      $("go").disabled = true; $("go").textContent = "Analyzing…";
+      try {
+        const r = await fetch("/submit", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, creator_id: $("creator").value || null })
+        });
+        const data = await r.json();
+        if (!r.ok) { alert(data.error || "Rate limit or error — see response."); render(data, r.status); return; }
+        render(data, r.status);
+      } finally {
+        $("go").disabled = false; $("go").textContent = "Analyze";
+      }
+    }
+
+    function render(d, status) {
+      $("result").classList.remove("hidden");
+      $("raw").textContent = JSON.stringify(d, null, 2);
+      if (!d.label) { $("labelTitle").textContent = "Error"; $("labelBody").textContent = d.error || ("HTTP " + status); return; }
+
+      currentId = d.content_id;
+      $("cid").textContent = "content_id: " + d.content_id;
+      $("appealBox").classList.add("hidden"); $("appealMsg").textContent = "";
+
+      const variant = d.label.variant;
+      const cls = variant === "high_confidence_ai" ? "ai"
+                : variant === "high_confidence_human" ? "human" : "uncertain";
+      const lab = $("label");
+      lab.className = "label " + cls;
+      $("labelTitle").textContent = d.label.title;
+      $("labelBody").textContent = d.label.body;
+
+      const pct = Math.round(d.confidence * 100);
+      $("meterFill").style.width = pct + "%";
+      $("confPct").textContent = pct + "% confidence · ai_score " + d.ai_score.toFixed(2)
+                                 + " · " + d.attribution;
+
+      const sig = d.signals || [];
+      const llm = sig.find(s => s.name === "llm") || {};
+      const sty = sig.find(s => s.name === "stylometry") || {};
+      $("signals").innerHTML =
+        '<span class="pill">signals</span>' +
+        '<span class="pill">LLM: ' + (llm.available ? ("p=" + llm.ai_probability) : "unavailable (offline)") + '</span>' +
+        '<span class="pill">stylometry: p=' + (sty.ai_probability ?? "?") +
+        " · reliability " + (sty.reliability ?? "?") + '</span>';
+    }
+
+    async function sendAppeal() {
+      if (!currentId) return;
+      const reason = $("reason").value.trim();
+      if (!reason) { $("appealMsg").textContent = "Please add your reasoning."; return; }
+      $("sendAppeal").disabled = true;
+      try {
+        const r = await fetch("/appeal", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content_id: currentId, creator_reasoning: reason, creator_id: $("creator").value || null })
+        });
+        const data = await r.json();
+        $("appealMsg").innerHTML = r.ok
+          ? '<span class="ok">✓ ' + data.message + ' Status is now "' + data.status + '".</span>'
+          : '<span class="warn">' + (data.error || "Error") + '</span>';
+      } finally {
+        $("sendAppeal").disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
