@@ -11,6 +11,7 @@ The design principle throughout: **on a writing platform, wrongly branding a
 human's work as AI is the worst possible outcome.** The confidence scoring, the
 asymmetric label thresholds, and the appeals workflow all bend toward *not*
 falsely accusing a human.
+<img width="760" height="477" alt="image" src="https://github.com/user-attachments/assets/cea2e6f8-6d75-445a-816b-ee4bb86879fa" />
 
 > Full design rationale and the pre-implementation spec live in
 > [planning.md](planning.md). This README documents what was built and how.
